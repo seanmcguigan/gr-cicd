@@ -45,24 +45,5 @@ spec:
   - protocol: TCP
     port: 80
     targetPort: 5678
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: echo-ingress
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-spec:
-  ingressClassName: nginx
-  rules:
-  - host: bar.localhost
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: bar-service
-            port:
-              number: 80
+
 

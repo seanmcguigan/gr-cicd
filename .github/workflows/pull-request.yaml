@@ -60,9 +60,10 @@ jobs:
             --selector=app.kubernetes.io/component=controller \
             --timeout=300s
 
-      - name: Deploy Services and Ingress
+      - name: Deploy Services
         run: |
-          kubectl apply -f tests/k8s-manifests
+          kubectl apply -f tests/k8s-manifests/foo-service.yaml
+          kubectl apply -f tests/k8s-manifests/bar-service.yaml
 
       - name: Wait for deployments to be ready
         run: |
@@ -71,7 +72,11 @@ jobs:
           
           # Verify pods are running
           kubectl get pods -o wide
-          
+      
+      - name: Deploy Ingress
+        run: |
+          kubectl apply -f tests/k8s-manifests/ingress.yaml
+
           # Verify ingress is configured
           kubectl get ingress
 
@@ -80,7 +85,7 @@ jobs:
           # port forward ingress controller to localhost
           kubectl port-forward --namespace ingress-nginx svc/ingress-nginx-controller 8080:80 &
           
-          # Wait a bit for ingress to fully configure
+          # Wait for ingress to fully configure
           sleep 10
           
           # Test foo endpoint
