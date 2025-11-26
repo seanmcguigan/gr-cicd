@@ -437,9 +437,9 @@ jobs:
                   <details>
                   <summary>📊 Detailed Load Test Results (Click to expand)</summary>
                   
-                  \`\`\`
+                  \\\`\\\`\\\`
                   ${results}
-                  \`\`\`
+                  \\\`\\\`\\\`
                   
                   </details>
                   
