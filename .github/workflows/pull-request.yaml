@@ -241,134 +241,231 @@ jobs:
           sudo apt-get install -y apache2-utils
 
       - name: Run load tests
-        id: load_test
-        run: |
-          # Create load test script
-          cat > load_test.sh << 'SCRIPT'
-          #!/bin/bash
-          
-          OUTPUT_FILE="load_test_results.txt"
-          > $OUTPUT_FILE
-          
-          echo "🚀 Starting Load Tests" | tee -a $OUTPUT_FILE
-          echo "===========================================" | tee -a $OUTPUT_FILE
-          echo "" | tee -a $OUTPUT_FILE
-          
-          # Test parameters
-          REQUESTS=1000
-          CONCURRENCY=50
-          DURATION=30
-          
-          # Function to run load test
-          run_load_test() {
-            local host=$1
-            local url=$2
-            
-            echo "Testing $host" | tee -a $OUTPUT_FILE
-            echo "-------------------------------------------" | tee -a $OUTPUT_FILE
-            
-            # Run Apache Bench
-            ab -n $REQUESTS -c $CONCURRENCY -H "Host: $host" $url 2>&1 | tee -a ab_temp.txt
-            
-            # Extract key metrics
-            echo "📊 Results for $host:" | tee -a $OUTPUT_FILE
-            
-            grep "Requests per second:" ab_temp.txt | tee -a $OUTPUT_FILE
-            grep "Time per request:" ab_temp.txt | head -2 | tee -a $OUTPUT_FILE
-            grep "Failed requests:" ab_temp.txt | tee -a $OUTPUT_FILE
-            grep "Complete requests:" ab_temp.txt | tee -a $OUTPUT_FILE
-            
-            echo "" | tee -a $OUTPUT_FILE
-            echo "Percentile Response Times:" | tee -a $OUTPUT_FILE
-            grep -A 6 "Percentage of the requests served" ab_temp.txt | tee -a $OUTPUT_FILE
-            
-            echo "" | tee -a $OUTPUT_FILE
-            echo "===========================================" | tee -a $OUTPUT_FILE
-            echo "" | tee -a $OUTPUT_FILE
-            
-            rm -f ab_temp.txt
-          }
-          
-          # Run tests for both services with randomization
-          echo "🎯 Testing FOO service..." | tee -a $OUTPUT_FILE
-          run_load_test "foo.localhost" "http://localhost/"
-          
-          echo "🎯 Testing BAR service..." | tee -a $OUTPUT_FILE
-          run_load_test "bar.localhost" "http://localhost/"
-          
-          # Mixed traffic test
-          echo "🔀 Testing MIXED traffic (randomized)..." | tee -a $OUTPUT_FILE
-          echo "-------------------------------------------" | tee -a $OUTPUT_FILE
-          
-          for i in {1..500}; do
-            if [ $((i % 2)) -eq 0 ]; then
-              curl -s -H "Host: foo.localhost" http://localhost/ > /dev/null &
-            else
-              curl -s -H "Host: bar.localhost" http://localhost/ > /dev/null &
-            fi
-            
-            # Limit concurrent requests
-            if [ $((i % 50)) -eq 0 ]; then
-              wait
-            fi
-          done
-          wait
-          
-          echo "✅ Mixed traffic test completed (500 requests)" | tee -a $OUTPUT_FILE
-          echo "" | tee -a $OUTPUT_FILE
-          
-          cat $OUTPUT_FILE
-          SCRIPT
-          
-          chmod +x load_test.sh
-          ./load_test.sh
-          
-          # Set output for PR comment
-          echo "RESULTS<<EOF" >> $GITHUB_OUTPUT
-          cat load_test_results.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+              id: load_test
+              run: |
+                # Create load test script
+                cat > load_test.sh << 'SCRIPT'
+                #!/bin/bash
+                
+                OUTPUT_FILE="load_test_results.txt"
+                JSON_FILE="load_test_results.json"
+                > $OUTPUT_FILE
+                
+                echo "🚀 Starting Load Tests" | tee -a $OUTPUT_FILE
+                echo "===========================================" | tee -a $OUTPUT_FILE
+                echo "" | tee -a $OUTPUT_FILE
+                
+                # Test parameters
+                REQUESTS=2000
+                CONCURRENCY=50
+                
+                # Function to extract and format metrics
+                extract_metrics() {
+                  local ab_output=$1
+                  local host=$2
+                  
+                  # Extract values
+                  local complete=$(echo "$ab_output" | grep "Complete requests:" | awk '{print $3}')
+                  local failed=$(echo "$ab_output" | grep "Failed requests:" | awk '{print $3}')
+                  local rps=$(echo "$ab_output" | grep "Requests per second:" | awk '{print $4}')
+                  local mean_time=$(echo "$ab_output" | grep "Time per request:" | head -1 | awk '{print $4}')
+                  local total_time=$(echo "$ab_output" | grep "Time taken for tests:" | awk '{print $5}')
+                  
+                  # Extract percentiles
+                  local p50=$(echo "$ab_output" | grep "50%" | awk '{print $2}')
+                  local p66=$(echo "$ab_output" | grep "66%" | awk '{print $2}')
+                  local p75=$(echo "$ab_output" | grep "75%" | awk '{print $2}')
+                  local p80=$(echo "$ab_output" | grep "80%" | awk '{print $2}')
+                  local p90=$(echo "$ab_output" | grep "90%" | awk '{print $2}')
+                  local p95=$(echo "$ab_output" | grep "95%" | awk '{print $2}')
+                  local p98=$(echo "$ab_output" | grep "98%" | awk '{print $2}')
+                  local p99=$(echo "$ab_output" | grep "99%" | awk '{print $2}')
+                  local p100=$(echo "$ab_output" | grep "100%" | awk '{print $2}')
+                  
+                  # Calculate failure percentage
+                  local failed_pct=0
+                  if [ "$complete" -gt 0 ]; then
+                    failed_pct=$(echo "scale=2; ($failed / $complete) * 100" | bc)
+                  fi
+                  
+                  # Format output
+                  echo "📊 Load Test Results for $host" | tee -a $OUTPUT_FILE
+                  echo "-------------------------------------------" | tee -a $OUTPUT_FILE
+                  echo "" | tee -a $OUTPUT_FILE
+                  
+                  echo "Request Statistics:" | tee -a $OUTPUT_FILE
+                  echo "  ✓ Total Requests:        $complete" | tee -a $OUTPUT_FILE
+                  echo "  ✗ Failed Requests:       $failed ($failed_pct%)" | tee -a $OUTPUT_FILE
+                  echo "  ⚡ Requests/sec:          $rps req/s" | tee -a $OUTPUT_FILE
+                  echo "  ⏱️  Total Time:            $total_time seconds" | tee -a $OUTPUT_FILE
+                  echo "" | tee -a $OUTPUT_FILE
+                  
+                  echo "Response Time Statistics (ms):" | tee -a $OUTPUT_FILE
+                  echo "  • Average (Mean):        $mean_time ms" | tee -a $OUTPUT_FILE
+                  echo "  • 50th Percentile (p50): $p50 ms" | tee -a $OUTPUT_FILE
+                  echo "  • 66th Percentile (p66): $p66 ms" | tee -a $OUTPUT_FILE
+                  echo "  • 75th Percentile (p75): $p75 ms" | tee -a $OUTPUT_FILE
+                  echo "  • 80th Percentile (p80): $p80 ms" | tee -a $OUTPUT_FILE
+                  echo "  • 90th Percentile (p90): $p90 ms" | tee -a $OUTPUT_FILE
+                  echo "  • 95th Percentile (p95): $p95 ms" | tee -a $OUTPUT_FILE
+                  echo "  • 98th Percentile (p98): $p98 ms" | tee -a $OUTPUT_FILE
+                  echo "  • 99th Percentile (p99): $p99 ms" | tee -a $OUTPUT_FILE
+                  echo "  • Max (p100):            $p100 ms" | tee -a $OUTPUT_FILE
+                  echo "" | tee -a $OUTPUT_FILE
+                  
+                  # Store JSON data for summary
+                  cat >> $JSON_FILE << EOF
+      {
+        "host": "$host",
+        "total_requests": $complete,
+        "failed_requests": $failed,
+        "failed_percentage": $failed_pct,
+        "requests_per_second": $rps,
+        "total_time_seconds": $total_time,
+        "response_times_ms": {
+          "mean": $mean_time,
+          "p50": $p50,
+          "p66": $p66,
+          "p75": $p75,
+          "p80": $p80,
+          "p90": $p90,
+          "p95": $p95,
+          "p98": $p98,
+          "p99": $p99,
+          "p100": $p100
+        }
+      }
+      EOF
+                }
+                
+                # Function to run load test
+                run_load_test() {
+                  local host=$1
+                  local url=$2
+                  
+                  echo "🎯 Testing $host..." | tee -a $OUTPUT_FILE
+                  echo "" | tee -a $OUTPUT_FILE
+                  
+                  # Run Apache Bench and capture output
+                  ab_output=$(ab -n $REQUESTS -c $CONCURRENCY -H "Host: $host" $url 2>&1)
+                  
+                  # Extract and format metrics
+                  extract_metrics "$ab_output" "$host"
+                  
+                  echo "===========================================" | tee -a $OUTPUT_FILE
+                  echo "" | tee -a $OUTPUT_FILE
+                }
+                
+                # Initialize JSON file
+                echo "[" > $JSON_FILE
+                
+                # Run tests for both services
+                run_load_test "foo.localhost" "http://localhost/"
+                echo "," >> $JSON_FILE
+                run_load_test "bar.localhost" "http://localhost/"
+                
+                # Close JSON array
+                echo "]" >> $JSON_FILE
+                
+                # Create summary table
+                echo "📈 Summary Comparison Table" | tee -a $OUTPUT_FILE
+                echo "===========================================" | tee -a $OUTPUT_FILE
+                echo "" | tee -a $OUTPUT_FILE
+                
+                # Extract data from JSON for table
+                foo_rps=$(cat $JSON_FILE | grep -A 20 "foo.localhost" | grep "requests_per_second" | awk -F': ' '{print $2}' | tr -d ',')
+                bar_rps=$(cat $JSON_FILE | grep -A 20 "bar.localhost" | grep "requests_per_second" | awk -F': ' '{print $2}' | tr -d ',')
+                
+                foo_failed=$(cat $JSON_FILE | grep -A 20 "foo.localhost" | grep "failed_percentage" | awk -F': ' '{print $2}' | tr -d ',')
+                bar_failed=$(cat $JSON_FILE | grep -A 20 "bar.localhost" | grep "failed_percentage" | awk -F': ' '{print $2}' | tr -d ',')
+                
+                foo_p50=$(cat $JSON_FILE | grep -A 20 "foo.localhost" | grep "\"p50\"" | awk -F': ' '{print $2}' | tr -d ',')
+                bar_p50=$(cat $JSON_FILE | grep -A 20 "bar.localhost" | grep "\"p50\"" | awk -F': ' '{print $2}' | tr -d ',')
+                
+                foo_p90=$(cat $JSON_FILE | grep -A 20 "foo.localhost" | grep "\"p90\"" | awk -F': ' '{print $2}' | tr -d ',')
+                bar_p90=$(cat $JSON_FILE | grep -A 20 "bar.localhost" | grep "\"p90\"" | awk -F': ' '{print $2}' | tr -d ',')
+                
+                foo_p95=$(cat $JSON_FILE | grep -A 20 "foo.localhost" | grep "\"p95\"" | awk -F': ' '{print $2}' | tr -d ',')
+                bar_p95=$(cat $JSON_FILE | grep -A 20 "bar.localhost" | grep "\"p95\"" | awk -F': ' '{print $2}' | tr -d ',')
+                
+                foo_p99=$(cat $JSON_FILE | grep -A 20 "foo.localhost" | grep "\"p99\"" | awk -F': ' '{print $2}' | tr -d ',')
+                bar_p99=$(cat $JSON_FILE | grep -A 20 "bar.localhost" | grep "\"p99\"" | awk -F': ' '{print $2}' | tr -d ',')
+                
+                printf "| %-20s | %-15s | %-15s |\n" "Metric" "foo.localhost" "bar.localhost" | tee -a $OUTPUT_FILE
+                printf "|%s|%s|%s|\n" "----------------------" "-----------------" "-----------------" | tee -a $OUTPUT_FILE
+                printf "| %-20s | %-15s | %-15s |\n" "Requests/sec" "${foo_rps} req/s" "${bar_rps} req/s" | tee -a $OUTPUT_FILE
+                printf "| %-20s | %-15s | %-15s |\n" "Failed %" "${foo_failed}%" "${bar_failed}%" | tee -a $OUTPUT_FILE
+                printf "| %-20s | %-15s | %-15s |\n" "p50 (median)" "${foo_p50} ms" "${bar_p50} ms" | tee -a $OUTPUT_FILE
+                printf "| %-20s | %-15s | %-15s |\n" "p90" "${foo_p90} ms" "${bar_p90} ms" | tee -a $OUTPUT_FILE
+                printf "| %-20s | %-15s | %-15s |\n" "p95" "${foo_p95} ms" "${bar_p95} ms" | tee -a $OUTPUT_FILE
+                printf "| %-20s | %-15s | %-15s |\n" "p99" "${foo_p99} ms" "${bar_p99} ms" | tee -a $OUTPUT_FILE
+                
+                echo "" | tee -a $OUTPUT_FILE
+                echo "✅ Load testing completed successfully!" | tee -a $OUTPUT_FILE
+                
+                cat $OUTPUT_FILE
+                SCRIPT
+                
+                chmod +x load_test.sh
+                ./load_test.sh
+                
+                # Set output for PR comment
+                echo "RESULTS<<EOF" >> $GITHUB_OUTPUT
+                cat load_test_results.txt >> $GITHUB_OUTPUT
+                echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Post results to PR
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const results = `${{ steps.load_test.outputs.RESULTS }}`;
-            
-            const comment = `## 🧪 Kubernetes Load Test Results
-            
-            **Cluster Configuration:**
-            - Multi-node KinD cluster (3 nodes: 1 control-plane, 2 workers)
-            - NGINX Ingress Controller
-            - 2 http-echo deployments (foo and bar)
-            
-            **Test Configuration:**
-            - Total Requests: 1000 per service
-            - Concurrency: 50
-            - Additional mixed traffic: 500 randomized requests
-            
-            ---
-            
-            \`\`\`
-            ${results}
-            \`\`\`
-            
-            ---
-            
-            **Routing Verification:**
-            - ✅ http://foo.localhost → foo service
-            - ✅ http://bar.localhost → bar service
-            
-            *Generated by GitHub Actions CI*
-            `;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+            - name: Post results to PR
+              uses: actions/github-script@v7
+              with:
+                script: |
+                  const results = `${{ steps.load_test.outputs.RESULTS }}`;
+                  
+                  const comment = `## 🧪 Kubernetes Load Test Results
+                  
+                  **Cluster Configuration:**
+                  - Multi-node KinD cluster (3 nodes: 1 control-plane, 2 workers)
+                  - NGINX Ingress Controller
+                  - 2 http-echo deployments (foo and bar, 2 replicas each)
+                  
+                  **Test Configuration:**
+                  - Total Requests: 2000 per service
+                  - Concurrency: 50 concurrent requests
+                  - Test Tool: Apache Bench (ab)
+                  
+                  ---
+                  
+                  <details>
+                  <summary>📊 Detailed Load Test Results (Click to expand)</summary>
+                  
+                  \`\`\`
+                  ${results}
+                  \`\`\`
+                  
+                  </details>
+                  
+                  ---
+                  
+                  **✅ Routing Verification:**
+                  - http://foo.localhost → foo service
+                  - http://bar.localhost → bar service
+                  
+                  **🔍 Key Metrics Captured:**
+                  - HTTP request duration (avg, p50, p90, p95, p99)
+                  - Percentage of failed HTTP requests
+                  - Requests/second handled by each service
+                  - Complete percentile distribution
+                  
+                  *Generated by GitHub Actions CI workflow*
+                  `;
+                  
+                  github.rest.issues.createComment({
+                    issue_number: context.issue.number,
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    body: comment
+                  });
 
-      - name: Cleanup
-        if: always()
-        run: |
-          kind delete cluster || true
+            - name: Cleanup
+              if: always()
+              run: |
+                kind delete cluster || true
