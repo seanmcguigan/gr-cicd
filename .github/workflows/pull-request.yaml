@@ -221,14 +221,17 @@ jobs:
 
       - name: Verify ingress health
         run: |
+          # port forward ingress controller to localhost
+          kubectl port-forward --namespace ingress-nginx svc/ingress-nginx-controller 8080:80 &
+          
           # Wait a bit for ingress to fully configure
-          sleep 20
+          sleep 10
           
           # Test foo endpoint
-          curl -H "Host: foo.localhost" http://localhost/ || exit 1
+          curl -H "Host: foo.localhost" http://localhost:8080/ || exit 1
           
           # Test bar endpoint
-          curl -H "Host: bar.localhost" http://localhost/ || exit 1
+          curl -H "Host: bar.localhost" http://localhost:8080/ || exit 1
           
           echo "✅ Both ingress endpoints are healthy"
 
