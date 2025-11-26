@@ -222,7 +222,7 @@ jobs:
       - name: Verify ingress health
         run: |
           # Wait a bit for ingress to fully configure
-          sleep 10
+          sleep 20
           
           # Test foo endpoint
           curl -H "Host: foo.localhost" http://localhost/ || exit 1
